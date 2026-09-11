@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ollama Dashboard V3.0</title>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#04040a;--card:#0b0b14;--card2:#141422;--accent:#a855f7;--accent2:#ec4899;--text:#f8fafc;--dim:#94a3b8}
+*{box-sizing:border-box;font-family:'Cairo',sans-serif}
+body{margin:0;background:var(--bg);color:var(--text);height:100dvh;display:flex;flex-direction:column}
+.topbar{display:flex;align-items:center;gap:8px;padding:12px;background:rgba(11,11,20,.7);backdrop-filter:blur(15px);border-bottom:1px solid #222;position:sticky;top:0;z-index:20}
+.logo{font-weight:800;font-size:16px;background:linear-gradient(90deg,var(--accent),var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.topbar select{background:var(--bg);border:1px solid #333;color:#fff;padding:9px 10px;border-radius:12px;flex:1;font-size:14px}
+.btn{background:var(--card2);border:1px solid #333;border-radius:12px;padding:9px 11px;color:#fff;cursor:pointer;font-size:16px}
+.chat{flex:1;overflow-y:auto;padding:20px 14px;display:flex;flex-direction:column;gap:16px}
+.msg{max-width:92%;padding:16px;border-radius:18px;animation:pop .2s;position:relative}
+@keyframes pop{from{opacity:0;transform:scale(.97)}}
+.me{align-self:flex-end;background:linear-gradient(135deg,var(--accent),var(--accent2));border-bottom-right-radius:6px}
+.ai{align-self:flex-start;background:var(--card2);border:1px solid #222;border-bottom-left-radius:6px}
+.actions{position:absolute;left:10px;top:8px;display:flex;gap:6px;opacity:0;transition:.2s}
+.msg:hover .actions{opacity:1}
+.actions button{background:#0005;border:0;color:#fff;border-radius:8px;padding:4px 8px;font-size:12px;cursor:pointer}
+.input{display:flex;gap:10px;padding:14px;background:rgba(11,11,20,.8);backdrop-filter:blur(15px);border-top:1px solid #222}
+.input textarea{flex:1;background:var(--bg);border:1px solid #333;border-radius:16px;padding:14px;color:#fff;resize:none;max-height:150px;outline:none;font-size:16px}
+.send{width:52px;height:52px;border-radius:16px;border:0;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;font-size:22px;cursor:pointer}
+.panel{position:fixed;top:0;right:0;width:100%;height:40%;background:var(--card);border-bottom:1px solid #222;transform:translateY(-100%);transition:.3s;z-index:30;padding:16px;overflow-y:auto}
+.panel.show{transform:translateY(0)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.card{background:var(--card2);padding:14px;border-radius:14px;border:1px solid #222}
+.card h4{margin:0 0 8px 0;font-size:14px;color:var(--dim)}
+.templates{display:flex;gap:8px;overflow-x:auto;padding:8px 0}
+.template{min-width:120px;background:var(--card2);border:1px solid #333;padding:10px;border-radius:12px;font-size:13px;text-align:center;cursor:pointer}
+.code{background:#000;border:1px solid #333;border-radius:10px;padding:12px;font-family:monospace;font-size:13px;margin:8px 0}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+<div class="logo">⚡ V3.0</div>
+<select id="agent"><option>🧠 عام</option><option>💻 مبرمج</option><option>🛡️ امن سيبراني</option><option>✍️ كاتب</option></select>
+<select id="model"></select>
+<button class="btn" onclick="togglePanel()">📊</button>
+</div>
+
+<div class="panel" id="panel">
+<h3>لوحة التحكم</h3>
+<div class="grid">
+<div class="card"><h4>الاسئلة اليوم</h4><div id="stat_q">0</div></div>
+<div class="card"><h4>متوسط السرعة</h4><div id="stat_s">0ث</div></div>
+</div>
+<h4 style="margin-top:15px">قوالب سريعة</h4>
+<div class="templates">
+<div class="template" onclick="useTemplate('اكتب لي سكربت بايثون لفحص المنافذ المفتوحة')">🐍 سكربت بايثون</div>
+<div class="template" onclick="useTemplate('اشرح لي ثغرة XSS وكيف احمي منها')">🛡️ شرح ثغرة</div>
+<div class="template" onclick="useTemplate('اكتب لي تقرير اختبار اختراق احترافي')">📄 تقرير</div>
+<div class="template" onclick="useTemplate('حول الكود التالي الى GoLang')">🔄 تحويل كود</div>
+</div>
+</div>
+
+<div class="chat" id="chat"></div>
+
+<div class="input">
+<textarea id="prompt" rows="1" placeholder="اسأل Ollama اي شي..."></textarea>
+<button class="send" id="send">➤</button>
+</div>
+
+<script>
+const chat = document.getElementById('chat');
+const prompt = document.getElementById('prompt');
+let chats = JSON.parse(localStorage.getItem('dash_v3')||'[]');
+let stats = JSON.parse(localStorage.getItem('stats_v3')||'{"q":0,"t":0}');
+
+async function loadModels(){
+  const res = await fetch('/api/tags'); const data = await res.json();
+  model.innerHTML = data.models.map(m=>`<option>${m.name}</option>`).join('');
+}
+function add(role, text){
+  const div = document.createElement('div'); div.className='msg '+ (role==='user'?'me':'ai');
+  div.innerHTML = `<div class="actions"><button onclick="copy(this)">نسخ</button><button onclick="regen(this)">🔄</button></div>` + format(text);
+  chat.appendChild(div); chat.scrollTop=chat.scrollHeight; return div;
+}
+function format(t){ return t.replace(/```([\s\S]*?)```/g,'<div class="code">$1</div>') }
+function copy(btn){ navigator.clipboard.writeText(btn.parentNode.parentNode.innerText); btn.innerText='تم' }
+async function send(){
+  const q = prompt.value.trim(); if(!q) return; 
+  add('user',q); prompt.value='';
+  stats.q++; localStorage.setItem('stats_v3',JSON.stringify(stats)); updateStats();
+  const ai = add('ai','');
+  const start = Date.now();
+  const res = await fetch(`/ask?q=${encodeURIComponent(q)}&model=${model.value}`);
+  const reader = res.body.getReader(); const dec = new TextDecoder(); let full='';
+  while(true){ const {value,done}=await reader.read(); if(done) break;
+    dec.decode(value).split('\n').filter(l=>l).forEach(line=>{
+      const d=JSON.parse(line); if(d.response){ full+=d.response; ai.innerHTML=format(full)+'<div class="actions"><button onclick="copy(this)">نسخ</button></div>'; chat.scrollTop=chat.scrollHeight; }
+    });
+  }
+  stats.t += Date.now()-start; localStorage.setItem('stats_v3',JSON.stringify(stats)); updateStats();
+}
+function updateStats(){
+  stat_q.innerText = stats.q;
+  stat_s.innerText = (stats.q? (stats.t/stats.q/1000).toFixed(1):0)+'ث';
+}
+function togglePanel(){ panel.classList.toggle('show') }
+function useTemplate(t){ prompt.value=t; prompt.focus() }
+send.onclick=send; prompt.onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}}
+prompt.oninput=()=>{prompt.style.height='auto';prompt.style.height=prompt.scrollHeight+'px'}
+chats.forEach(m=>add(m.role,m.text)); loadModels(); updateStats();
+</script>
+</body>
+</html>
